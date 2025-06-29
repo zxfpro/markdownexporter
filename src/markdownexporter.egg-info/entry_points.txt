@@ -1,2 +1,2 @@
 [mkdocs.plugins]
-llm-exporter = markdownexporter.plugin:MarkdownExporter
+markdownexporter = markdownexporter.plugin:MarkdownExporter

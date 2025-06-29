@@ -1,11 +1,9 @@
-# src/mkdocs_llm_exporter/plugin.py
-
+# src/markdownexporter/plugin.py
 import os
+import time
 from mkdocs.plugins import BasePlugin
 from mkdocs.config import config_options
 from mkdocs.config.defaults import MkDocsConfig
-
-# (可以添加一些类型提示，让代码更健壮)
 from mkdocs.structure.pages import Page
 from mkdocs.structure.files import Files
 
@@ -15,50 +13,79 @@ class MarkdownExporter(BasePlugin):
         ('enabled', config_options.Type(bool, default=True)),
     )
 
-    def on_config(self, config: MkDocsConfig):
-        if not self.config.get('enabled'):
-            return config
+    def __init__(self):
+        """类的构造函数，在实例创建时运行。"""
+        # 使用你实际的插件名，让日志更清晰
+        self.log_prefix = "[markdownexporter]" 
+        self.instance_id = int(time.time() * 1000)
+        print(f"{self.log_prefix} 🕵️  New instance created with ID: {self.instance_id}")
+        
+        # 提前初始化，避免 AttributeError
+        self.nav_paths = []
         self.pages_content = {}
-        self._get_nav_paths(config.get('nav', []))
+        super().__init__()
+
+    def on_config(self, config: MkDocsConfig):
+        print(f"{self.log_prefix} on_config called for instance ID: {self.instance_id}")
+        
+        # 更新 self.nav_paths
+        self.nav_paths = self._get_nav_paths(config.get('nav', []))
+        
+        if not self.nav_paths:
+            print(f"{self.log_prefix} WARNING: No 'nav' configuration found or it's empty.")
         return config
 
     def _get_nav_paths(self, nav_structure):
-        # ... (递归获取 nav 路径的函数，和之前一样)
-        # 最好在这里存储起来
-        pass # 实现和之前一样
+        paths = []
+        for item in nav_structure:
+            if isinstance(item, str):
+                paths.append(item)
+            elif isinstance(item, dict):
+                for key, value in item.items():
+                    if isinstance(value, str):
+                        paths.append(value)
+                    elif isinstance(value, list):
+                        paths.extend(self._get_nav_paths(value))
+        return paths
 
     def on_page_markdown(self, markdown: str, page: Page, config: MkDocsConfig, files: Files) -> str:
         if not self.config.get('enabled'):
             return markdown
-        # ... (捕获 markdown 的逻辑，和之前一样)
+        
         self.pages_content[page.file.src_path] = markdown
         return markdown
 
     def on_post_build(self, config: MkDocsConfig):
+        print(f"{self.log_prefix} on_post_build called for instance ID: {self.instance_id}")
+
         if not self.config.get('enabled'):
+            print(f"{self.log_prefix} Plugin disabled, skipping export for instance ID: {self.instance_id}.")
             return
 
-        # --- 开始修改 ---
+        # 因为我们在 __init__ 中已经初始化了 nav_paths，所以不再需要 hasattr 检查
+        # 直接检查 nav_paths 是否有内容即可
+        if not self.nav_paths:
+            print(f"{self.log_prefix} WARNING on instance ID: {self.instance_id}. "
+                  "The 'nav_paths' attribute is empty. This might be due to a missing 'nav' in mkdocs.yml "
+                  "or an unexpected re-instantiation of the plugin.")
         
-        # 1. 获取 mkdocs.yml 所在的目录，这就是我们的项目根目录
         project_root = os.path.dirname(os.path.abspath(config['config_file_path']))
+        output_path = os.path.join(project_root, self.config['output_file'])
         
-        # 2. 在项目根目录下构建输出文件的绝对路径
-        output_file_name = self.config['output_file']
-        output_path = os.path.join(project_root, output_file_name)
+        print(f"{self.log_prefix} Exporting combined markdown to: {output_path}")
 
-        # --- 结束修改 ---
-        print("\n\n[llm-exporter] --- DIAGNOSTICS ---")
-        print(f"[llm-exporter] Paths from nav config: {self.nav_paths}")
-        print(f"[llm-exporter] Pages captured by on_page_markdown: {list(self.pages_content.keys())}")
-        print("[llm-exporter] --- END DIAGNOSTICS ---\n")
-        print(f"\n[llm-exporter] Exporting combined markdown to: {output_path}")
-
-        # 使用新的 output_path 变量
+        exported_count = 0
         with open(output_path, 'w', encoding='utf-8') as f:
-            # ... 写入文件的逻辑保持不变 ...
             site_name = config.get('site_name', 'Project')
             f.write(f"# {site_name} - Combined Documentation\n\n")
-            # ... a's'd'f
-        
-        print(f"[llm-exporter] ✅ Export successful!")
+
+            for path in self.nav_paths:
+                if path in self.pages_content:
+                    content = self.pages_content[path]
+                    f.write(f"\n\n---\n\n")
+                    f.write(f"<!-- Original File: {path} -->\n")
+                    f.write(f"## (Content from: {path})\n\n")
+                    f.write(content)
+                    exported_count += 1
+            
+        print(f"{self.log_prefix} ✅ Export successful! Exported {exported_count} pages for instance ID: {self.instance_id}")
