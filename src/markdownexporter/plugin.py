@@ -27,13 +27,20 @@ class MarkdownExporter(BasePlugin):
 
     def on_config(self, config: MkDocsConfig):
         print(f"{self.log_prefix} on_config called for instance ID: {self.instance_id}")
-        
+
+        # ==================== 核心修复 ====================
+        # 设置一个比 mkdocstrings (-100) 更低的优先级
+        self.priority = -200 
+        print(f"{self.log_prefix} Priority set to {self.priority} to run after mkdocstrings.")
+        # =================================================
+
         # 更新 self.nav_paths
         self.nav_paths = self._get_nav_paths(config.get('nav', []))
         
         if not self.nav_paths:
             print(f"{self.log_prefix} WARNING: No 'nav' configuration found or it's empty.")
         return config
+
 
     def _get_nav_paths(self, nav_structure):
         paths = []
