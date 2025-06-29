@@ -48,7 +48,10 @@ class MarkdownExporter(BasePlugin):
         output_path = os.path.join(project_root, output_file_name)
 
         # --- 结束修改 ---
-        
+        print("\n\n[llm-exporter] --- DIAGNOSTICS ---")
+        print(f"[llm-exporter] Paths from nav config: {self.nav_paths}")
+        print(f"[llm-exporter] Pages captured by on_page_markdown: {list(self.pages_content.keys())}")
+        print("[llm-exporter] --- END DIAGNOSTICS ---\n")
         print(f"\n[llm-exporter] Exporting combined markdown to: {output_path}")
 
         # 使用新的 output_path 变量
