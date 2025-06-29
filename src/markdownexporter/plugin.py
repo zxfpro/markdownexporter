@@ -1,46 +1,45 @@
 # src/markdownexporter/plugin.py
 import os
+import re
 import time
 from mkdocs.plugins import BasePlugin
 from mkdocs.config import config_options
 from mkdocs.config.defaults import MkDocsConfig
-from mkdocs.structure.pages import Page
-from mkdocs.structure.files import Files
+
+# 这个模块可能需要手动安装： pip install mkdocstrings
+# 或者在你的插件依赖中声明它
+from mkdocstrings.plugin import MkdocstringsPlugin
 
 class MarkdownExporter(BasePlugin):
     config_scheme = (
-        ('output_file', config_options.Type(str, default='combined_docs_for_llm.md')),
+        ('output_file', config_options.Type(str, default='llm_docs_final.md')),
         ('enabled', config_options.Type(bool, default=True)),
     )
 
     def __init__(self):
-        """类的构造函数，在实例创建时运行。"""
-        # 使用你实际的插件名，让日志更清晰
-        self.log_prefix = "[markdownexporter]" 
-        self.instance_id = int(time.time() * 1000)
-        print(f"{self.log_prefix} 🕵️  New instance created with ID: {self.instance_id}")
-        
-        # 提前初始化，避免 AttributeError
+        self.log_prefix = "[markdownexporter]"
+        self.handler = None
         self.nav_paths = []
-        self.pages_content = {}
+        print(f"{self.log_prefix} 🕵️  Plugin instance created.")
         super().__init__()
 
     def on_config(self, config: MkDocsConfig):
-        print(f"{self.log_prefix} on_config called for instance ID: {self.instance_id}")
-
-        # ==================== 核心修复 ====================
-        # 设置一个比 mkdocstrings (-100) 更低的优先级
-        self.priority = -200 
-        print(f"{self.log_prefix} Priority set to {self.priority} to run after mkdocstrings.")
-        # =================================================
-
-        # 更新 self.nav_paths
-        self.nav_paths = self._get_nav_paths(config.get('nav', []))
+        print(f"{self.log_prefix} on_config hook running...")
         
-        if not self.nav_paths:
-            print(f"{self.log_prefix} WARNING: No 'nav' configuration found or it's empty.")
-        return config
+        # 获取 mkdocstrings 插件的实例，这是核心！
+        try:
+            mkdocstrings_plugin = config['plugins']['mkdocstrings']
+            if isinstance(mkdocstrings_plugin, MkdocstringsPlugin):
+                self.handler = mkdocstrings_plugin.get_handler('python')
+                print(f"{self.log_prefix} ✅ Successfully obtained 'python' handler from mkdocstrings.")
+            else:
+                 print(f"{self.log_prefix} ❌ ERROR: Could not get a valid mkdocstrings plugin instance.")
+        except KeyError:
+            print(f"{self.log_prefix} ❌ ERROR: 'mkdocstrings' plugin not found in config. This plugin depends on it.")
 
+        # 获取 nav 路径
+        self.nav_paths = self._get_nav_paths(config.get('nav', []))
+        return config
 
     def _get_nav_paths(self, nav_structure):
         paths = []
@@ -55,44 +54,63 @@ class MarkdownExporter(BasePlugin):
                         paths.extend(self._get_nav_paths(value))
         return paths
 
-    def on_page_markdown(self, markdown: str, page: Page, config: MkDocsConfig, files: Files) -> str:
-        if not self.config.get('enabled'):
-            return markdown
-        
-        self.pages_content[page.file.src_path] = markdown
-        return markdown
+    # 我们不再需要 on_page_markdown 钩子了，可以删除它
 
     def on_post_build(self, config: MkDocsConfig):
-        print(f"{self.log_prefix} on_post_build called for instance ID: {self.instance_id}")
+        print(f"{self.log_prefix} on_post_build hook running...")
 
-        if not self.config.get('enabled'):
-            print(f"{self.log_prefix} Plugin disabled, skipping export for instance ID: {self.instance_id}.")
+        if not self.config.get('enabled') or not self.handler:
+            if not self.handler:
+                print(f"{self.log_prefix} Skipping export because mkdocstrings handler is not available.")
+            else:
+                print(f"{self.log_prefix} Skipping export because plugin is disabled.")
             return
 
-        # 因为我们在 __init__ 中已经初始化了 nav_paths，所以不再需要 hasattr 检查
-        # 直接检查 nav_paths 是否有内容即可
-        if not self.nav_paths:
-            print(f"{self.log_prefix} WARNING on instance ID: {self.instance_id}. "
-                  "The 'nav_paths' attribute is empty. This might be due to a missing 'nav' in mkdocs.yml "
-                  "or an unexpected re-instantiation of the plugin.")
-        
         project_root = os.path.dirname(os.path.abspath(config['config_file_path']))
+        docs_dir = config.get('docs_dir', 'docs')
         output_path = os.path.join(project_root, self.config['output_file'])
         
-        print(f"{self.log_prefix} Exporting combined markdown to: {output_path}")
+        # 用于查找 ::: identifier 模式的正则表达式
+        # 它会匹配 ':::', 后面可能跟一些空格, 然后是标识符
+        identifier_regex = re.compile(r':::[\s]*([\w\._-]+)')
 
+        print(f"{self.log_prefix} Exporting combined and rendered markdown to: {output_path}")
+        
         exported_count = 0
-        with open(output_path, 'w', encoding='utf-8') as f:
+        with open(output_path, 'w', encoding='utf-8') as f_out:
             site_name = config.get('site_name', 'Project')
-            f.write(f"# {site_name} - Combined Documentation\n\n")
+            f_out.write(f"# {site_name} - Combined Documentation\n\n")
 
-            for path in self.nav_paths:
-                if path in self.pages_content:
-                    content = self.pages_content[path]
-                    f.write(f"\n\n---\n\n")
-                    f.write(f"<!-- Original File: {path} -->\n")
-                    f.write(f"## (Content from: {path})\n\n")
-                    f.write(content)
-                    exported_count += 1
-            
-        print(f"{self.log_prefix} ✅ Export successful! Exported {exported_count} pages for instance ID: {self.instance_id}")
+            for page_path in self.nav_paths:
+                full_path = os.path.join(docs_dir, page_path)
+                if not os.path.exists(full_path):
+                    print(f"{self.log_prefix} ⚠️  File not found, skipping: {full_path}")
+                    continue
+
+                f_out.write(f"\n\n---\n\n")
+                f_out.write(f"<!-- Original File: {page_path} -->\n")
+                f_out.write(f"## (Content from: {page_path})\n\n")
+
+                with open(full_path, 'r', encoding='utf-8') as f_in:
+                    content = f_in.read()
+                
+                # 查找并替换所有 mkdocstrings 占位符
+                def render_match(match):
+                    identifier = match.group(1)
+                    print(f"{self.log_prefix}   -> Rendering identifier: {identifier}")
+                    try:
+                        # 使用 handler.render() 来获取渲染后的 Markdown!
+                        rendered_markdown = self.handler.render(identifier, {})
+                        return rendered_markdown
+                    except Exception as e:
+                        print(f"{self.log_prefix}   ❌ ERROR rendering {identifier}: {e}")
+                        return f"Failed to render `{identifier}`."
+
+                # 使用 re.sub 和一个回调函数来替换所有匹配项
+                processed_content = identifier_regex.sub(render_match, content)
+                
+                f_out.write(processed_content)
+                exported_count += 1
+                print(f"{self.log_prefix}  - Appended and processed: {page_path}")
+        
+        print(f"{self.log_prefix} ✅ Export successful! Exported {exported_count} pages.")
