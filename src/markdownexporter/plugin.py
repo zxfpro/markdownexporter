@@ -8,7 +8,11 @@ from mkdocs.config.defaults import MkDocsConfig
 
 # 这个模块可能需要手动安装： pip install mkdocstrings
 # 或者在你的插件依赖中声明它
-from mkdocstrings.plugin import MkdocstringsPlugin
+# from mkdocstrings.plugin import MkdocstringsPlugin
+# src/markdownexporter/plugin.py
+# from mkdocstrings.plugin import MkdocstringsPlugin  <-- 删除
+from mkdocstrings import MkdocstringsPlugin # <-- 直接从包导入
+
 
 class MarkdownExporter(BasePlugin):
     config_scheme = (
@@ -54,9 +58,74 @@ class MarkdownExporter(BasePlugin):
                         paths.extend(self._get_nav_paths(value))
         return paths
 
-    # 我们不再需要 on_page_markdown 钩子了，可以删除它
+    # 我们不再需要 on_page_markdown 钩子了，可以删除它  in src/markdownexporter/plugin.py
 
     def on_post_build(self, config: MkDocsConfig):
+        print(f"{self.log_prefix} on_post_build hook running...")
+
+        if not self.config.get('enabled') or not self.handler:
+            # ... (这部分不变) ...
+            return
+
+        project_root = os.path.dirname(os.path.abspath(config['config_file_path']))
+        docs_dir = config.get('docs_dir', 'docs')
+        output_path = os.path.join(project_root, self.config['output_file'])
+        
+        identifier_regex = re.compile(r':::[\s]*([\w\._-]+)')
+
+        print(f"{self.log_prefix} Exporting combined and rendered markdown to: {output_path}")
+        
+        exported_count = 0
+        with open(output_path, 'w', encoding='utf-8') as f_out:
+            site_name = config.get('site_name', 'Project')
+            f_out.write(f"# {site_name} - Combined Documentation\n\n")
+
+            for page_path in self.nav_paths:
+                full_path = os.path.join(docs_dir, page_path)
+                if not os.path.exists(full_path):
+                    print(f"{self.log_prefix} ⚠️  File not found, skipping: {full_path}")
+                    continue
+
+                f_out.write(f"\n\n---\n\n")
+                f_out.write(f"<!-- Original File: {page_path} -->\n")
+                f_out.write(f"## (Content from: {page_path})\n\n")
+
+                with open(full_path, 'r', encoding='utf-8') as f_in:
+                    content = f_in.read()
+                
+                # =================== 核心修复在这里 ===================
+                def render_match(match):
+                    identifier = match.group(1)
+                    print(f"{self.log_prefix}   -> Rendering identifier: {identifier}")
+                    try:
+                        # 创建一个包含默认渲染选项的字典
+                        # 我们告诉它，我们不关心具体的模板选择，让它自己决定
+                        # 这是 mkdocstrings 内部处理的方式
+                        render_options = {
+                            "show_root_heading": True,
+                            "show_root_toc_entry": True,
+                            # ... 可以添加其他在 mkdocs.yml 中为 python handler 设置的选项
+                        }
+                        
+                        # 使用 handler.render() 来获取渲染后的 Markdown!
+                        # 我们不再传递一个空字典 {}，而是传递配置好的选项
+                        rendered_markdown = self.handler.render(identifier, render_options)
+                        return rendered_markdown
+                    except Exception as e:
+                        # 打印更详细的错误
+                        import traceback
+                        print(f"{self.log_prefix}   ❌ ERROR rendering {identifier}: {e}")
+                        # traceback.print_exc() # 取消注释以获取完整的堆栈跟踪
+                        return f"Failed to render `{identifier}`."
+
+                processed_content = identifier_regex.sub(render_match, content)
+                # =======================================================
+                
+                f_out.write(processed_content)
+                exported_count += 1
+                print(f"{self.log_prefix}  - Appended and processed: {page_path}")
+        
+        print(f"{self.log_prefix} ✅ Export successful! Exported {exported_count} pages.")
         print(f"{self.log_prefix} on_post_build hook running...")
 
         if not self.config.get('enabled') or not self.handler:
