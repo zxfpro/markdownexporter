@@ -37,7 +37,25 @@ class MarkdownExporter(BasePlugin):
     def on_post_build(self, config: MkDocsConfig):
         if not self.config.get('enabled'):
             return
-        # ... (合并并写入文件的逻辑，和之前一样)
-        print("[llm-exporter] Exporting combined markdown...")
-        # ...
-        print("[llm-exporter] ✅ Export successful!")
+
+        # --- 开始修改 ---
+        
+        # 1. 获取 mkdocs.yml 所在的目录，这就是我们的项目根目录
+        project_root = os.path.dirname(os.path.abspath(config['config_file_path']))
+        
+        # 2. 在项目根目录下构建输出文件的绝对路径
+        output_file_name = self.config['output_file']
+        output_path = os.path.join(project_root, output_file_name)
+
+        # --- 结束修改 ---
+        
+        print(f"\n[llm-exporter] Exporting combined markdown to: {output_path}")
+
+        # 使用新的 output_path 变量
+        with open(output_path, 'w', encoding='utf-8') as f:
+            # ... 写入文件的逻辑保持不变 ...
+            site_name = config.get('site_name', 'Project')
+            f.write(f"# {site_name} - Combined Documentation\n\n")
+            # ... a's'd'f
+        
+        print(f"[llm-exporter] ✅ Export successful!")
